@@ -105,18 +105,17 @@ threshold of 0.5, not the tuned 0.025. Parity means matching these values, even 
 
 ## Phases 3–6: one branch
 
-Do Phases 3–6 on a single branch, `feat/training-pipeline`, with one commit per phase. Start it from `main`
-once `refactor/data-layout`, `feat/data-pipeline` and `feat/training-core` are merged, because Phase 4 needs all of them.
+Do Phases 3–6 on a single branch, `feat/training-pipeline`, with one commit per phase.
 
 ## Phase 3: Artifacts and pyfunc wrapper
 
-- [ ] 3.1 `modeling/drift_baseline.py`: `compute_baseline_statistics(...)` + `log_baseline_metrics(stats)`
-- [ ] 3.2 `modeling/wrapper.py`: `SimpleLoggingWrapper`
+- [X] 3.1 `modeling/drift_baseline.py`: `compute_baseline_statistics(...)` + `log_baseline_metrics(stats)`
+- [X] 3.2 `modeling/wrapper.py`: `SimpleLoggingWrapper`
   - ⚠️ `log_path` default must stay **relative** (`artifacts/inference_log.json`), not `config.INFERENCE_LOG_PATH`
     (absolute), or the training machine's path is pickled into the served model
-- [ ] 3.3 `log_model(..., code_paths=["vial_classifier"])` so the exported model contains the package and loads
-  anywhere (serving image, CI validator)
-- [ ] 3.4 Tests (`tests/test_wrapper.py`, `tests/test_drift_baseline.py`):
+- [ ] 3.3 `log_model(..., code_paths=[str(config.PROJ_ROOT / "vial_classifier")])` so the exported model contains the
+  package and loads anywhere (serving image, CI validator). Goes in `main()` with 4.2; tick it after the 4.5 test.
+- [X] 3.4 Tests (`tests/test_wrapper.py`, `tests/test_drift_baseline.py`):
   - wrapper accepts bytes / base64 / path / `{"instances": [...]}` and returns `predictions`, `confidences`, `raw_outputs`, `num_samples`
   - a bad input gives `None` instead of crashing
   - each request is appended to the log file
