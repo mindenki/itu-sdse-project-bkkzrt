@@ -1,0 +1,23 @@
+.git
+.venv
+.pytest_cache
+.pytest-tmp
+__pycache__
+*.py[cod]
+
+# The image needs DVC pointer files, but JPEGs are downloaded at runtime into
+# the mounted data directory.
+data/**
+!data/**/
+!data/**/*.dvc
+!data/**/.gitignore
+!data/**/.gitkeep
+
+artifacts/
+mlflow-state/
+models/
+notebooks/
+reports/
+
+# Preserve the small DVC cache holding metadata, but not transient lock files.
+.dvc/tmp/

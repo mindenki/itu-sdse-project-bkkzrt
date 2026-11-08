@@ -72,6 +72,12 @@ data: requirements
 train: data
 	uv run python -m vial_classifier.modeling.train
 
+## Build and run training in the Linux container (set TRAIN_ARGS for smoke-test options)
+.PHONY: train-docker
+train-docker:
+	docker build -f docker/Dockerfile.train -t vial-train .
+	docker run --rm -v "$(CURDIR)/artifacts:/app/artifacts" -v "$(CURDIR)/mlflow-state:/app/mlflow-state" -v "$(CURDIR)/data:/app/data" vial-train $(TRAIN_ARGS)
+
 ## Promote the best model and export it to models/model
 .PHONY: export
 export:

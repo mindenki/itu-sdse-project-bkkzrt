@@ -139,18 +139,21 @@ Do Phases 3–6 on a single branch, `feat/training-pipeline`, with one commit pe
 
 ## Phase 5: Training container
 
-- [ ] 5.1 `docker/Dockerfile.train`:
+- [X] 5.1 `docker/Dockerfile.train`:
   - `python:3.13-slim` + uv
   - `COPY pyproject.toml uv.lock` → `uv sync --frozen --no-dev` (dependencies cached in their own layer; CPU torch)
   - `COPY vial_classifier/ .dvc/ data/**/*.dvc` → install the project
   - `ENTRYPOINT ["python", "-m", "vial_classifier.modeling.train"]`
-- [ ] 5.2 `.dockerignore`: `.venv`, `.git`, data images, `artifacts/`, `mlflow-state/`, `models/`, notebooks
-- [ ] 5.3 DVC without git in the container: run `dvc config core.no_scm true` in the image (the build context has no `.git`)
-- [ ] 5.4 Outputs to mounted volumes: `artifacts/`, `mlflow-state/` (and `data/` as a cache so images aren't re-downloaded)
+- [X] 5.2 `.dockerignore`: `.venv`, `.git`, data images, `artifacts/`, `mlflow-state/`, `models/`, notebooks
+- [X] 5.3 DVC without git in the container: run `dvc config core.no_scm true` in the image (the build context has no `.git`)
+- [X] 5.4 Outputs to mounted volumes: `artifacts/`, `mlflow-state/` (and `data/` as a cache so images aren't re-downloaded)
   `docker run --rm -v ./artifacts:/app/artifacts -v ./mlflow-state:/app/mlflow-state -v ./data:/app/data vial-train`
-- [ ] 5.5 Smoke run: `docker run ... vial-train --epochs 1 --limit 20`
-- [ ] 5.6 `make train-docker` target
-- [ ] 5.7 Hand-off note for Person D (Dagger): image build context, command, args, env vars, output directories
+- [X] 5.5 Smoke run: `docker run ... vial-train --epochs 1 --limit 20`
+- [X] 5.6 `make train-docker` target
+- [X] 5.7 Hand-off note for Person D (Dagger): image build context, command, args, env vars, output directories
+  - Build context: repository root. Build with `docker build -f docker/Dockerfile.train -t vial-train .`.
+  - The entrypoint is `python -m vial_classifier.modeling.train`; pass `--epochs 1 --limit 20` for CI smoke runs.
+  - Mount `/app/data`, `/app/artifacts`, and `/app/mlflow-state` to persistent job directories. No required environment variables.
 
 ## Phase 6: Docs and clean-up
 

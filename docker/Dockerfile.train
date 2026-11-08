@@ -1,0 +1,23 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+# Install locked production dependencies before copying source so this layer is cached.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY README.md ./
+COPY vial_classifier/ vial_classifier/
+COPY .dvc/ .dvc/
+COPY data/ data/
+
+# The container build context has no .git directory, but DVC must still restore
+# the metadata pointer files from its cache.
+RUN uv run --no-sync dvc config core.no_scm true \
+    && uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+ENTRYPOINT ["python", "-m", "vial_classifier.modeling.train"]
