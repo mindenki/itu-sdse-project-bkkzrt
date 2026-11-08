@@ -1,5 +1,6 @@
 """Slow integration coverage for the training CLI and its registered pyfunc model."""
 
+from pathlib import Path
 import subprocess
 import sys
 
@@ -39,7 +40,11 @@ def test_training_cli_registers_a_loadable_pyfunc_model():
     mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
     model = mlflow.pyfunc.load_model(f"models:/{config.MODEL_NAME}@best")
     result = model.predict({"instances": [str(image_paths[0])]})
+    model_dir = Path(
+        mlflow.artifacts.download_artifacts(artifact_uri=f"models:/{config.MODEL_NAME}@best")
+    )
 
     assert result["num_samples"] == 1
     assert result["predictions"][0] in (0, 1)
     assert result["confidences"][0] is not None
+    assert (model_dir / "code" / "vial_classifier" / "modeling" / "wrapper.py").is_file()

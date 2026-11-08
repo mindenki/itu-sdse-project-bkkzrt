@@ -394,7 +394,11 @@ def main(
         mlflow.log_param("classification_threshold", optimal_threshold)
 
         wrapper = SimpleLoggingWrapper(model=cnn_model)
-        mlflow.pyfunc.log_model(config.MODEL_ARTIFACT_PATH, python_model=wrapper)
+        mlflow.pyfunc.log_model(
+            config.MODEL_ARTIFACT_PATH,
+            python_model=wrapper,
+            code_paths=[str(config.PROJ_ROOT / "vial_classifier")],
+        )
 
         model_version = register_model(run.info.run_id)
 
