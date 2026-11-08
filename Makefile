@@ -69,7 +69,7 @@ data: requirements
 
 ## Train the model (logs to the local MLflow store in mlflow-state/)
 .PHONY: train
-train:
+train: data
 	uv run python -m vial_classifier.modeling.train
 
 ## Promote the best model and export it to models/model

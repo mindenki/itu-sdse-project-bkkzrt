@@ -52,6 +52,9 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: runs the real training and MLflow pipeline",
+]
 
 [tool.ruff]
 line-length = 99

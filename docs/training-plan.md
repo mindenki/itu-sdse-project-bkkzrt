@@ -123,15 +123,19 @@ Do Phases 3–6 on a single branch, `feat/training-pipeline`, with one commit pe
 
 ## Phase 4: Pipeline entry point and registration
 
-- [ ] 4.1 `modeling/registry.py`: `wait_until_ready(...)`, `register_model(run_id) -> version` (Staging, tags, `best` alias)
-- [ ] 4.2 `modeling/train.py`: `main()`, the full run in notebook order:
+- [X] 4.1 `modeling/registry.py`: `wait_until_ready(...)`, `register_model(run_id) -> version` (Staging, tags, `best` alias)
+- [X] 4.2 `modeling/train.py`: `main()`, the full run in notebook order:
   seed → load → split → loaders → image stats → class names → start run → log params → train → tune →
   evaluate → baseline → save checkpoint + results → log pyfunc → register → end run
-- [ ] 4.3 CLI options: `--epochs`, `--batch-size`, `--limit` (subset of images for smoke tests)
-- [ ] 4.4 `make train` runs data + training
-- [ ] 4.5 Slow integration test (`@pytest.mark.slow`): `--epochs 1 --limit 20` end to end, then load the logged pyfunc model and predict
-- [ ] 4.6 **Parity check**: `make train` against the Phase 0 table. Investigate any difference before moving on.
-- [ ] 4.7 Delete the `NotImplementedError` stubs that are now implemented
+- [X] 4.3 CLI options: `--epochs`, `--batch-size`, `--limit` (subset of images for smoke tests)
+- [X] 4.4 `make train` runs data + training
+- [X] 4.5 Slow integration test (`@pytest.mark.slow`): `--epochs 1 --limit 20` end to end, then load the logged pyfunc model and predict
+- [X] 4.6 **Parity check**: `make train` against the Phase 0 table. Investigate any difference before moving on.
+  - CPU/PyTorch 2.15.0 run matched split sizes, early stopping, threshold, and every recorded test metric.
+    The two wrapper predictions stayed class `1`; their rounded confidences were `0.5141` / `0.5150` rather than
+    `0.5144` / `0.5152`, a small CPU-level floating-point variation.
+- [X] 4.7 Delete the `NotImplementedError` stubs that are now implemented
+  - The remaining stub in `modeling/predict.py` is Person B's separate exported-model batch-inference task.
 
 ## Phase 5: Training container
 

@@ -1,3 +1,4 @@
+import json
 import os
 
 from loguru import logger
@@ -9,7 +10,20 @@ from torch import nn, optim
 import typer
 
 from vial_classifier import config
+from vial_classifier.dataset import create_dataloaders, load_image_dataset, split_dataset
+from vial_classifier.features import (
+    calculate_image_statistics,
+    define_transforms,
+    save_class_names,
+)
+from vial_classifier.modeling.drift_baseline import (
+    compute_baseline_statistics,
+    log_baseline_metrics,
+)
+from vial_classifier.modeling.evaluate import evaluate_cnn_model
 from vial_classifier.modeling.model import SimpleCNN, get_device
+from vial_classifier.modeling.registry import register_model
+from vial_classifier.modeling.wrapper import SimpleLoggingWrapper
 
 app = typer.Typer()
 
@@ -247,9 +261,153 @@ def tune_threshold(model, val_loader, device=None, threshold_range=None):
     return best_threshold
 
 
+def limit_image_dataset(image_dataset, limit):
+    """Keep a balanced subset for smoke-test runs.
+
+    The metadata is ordered by class, so taking the first ``limit`` rows would
+    leave a small run with only clean images. This helper is only used when
+    ``--limit`` is supplied; the default notebook-parity path is unchanged.
+    """
+    if limit is None or limit >= len(image_dataset):
+        return image_dataset
+
+    class_0 = [item for item in image_dataset if item[1] == 0]
+    class_1 = [item for item in image_dataset if item[1] == 1]
+    class_0_limit = limit // 2
+    class_1_limit = limit - class_0_limit
+
+    return class_0[:class_0_limit] + class_1[:class_1_limit]
+
+
 @app.command()
-def main():
+def main(
+    epochs: int = typer.Option(
+        config.NUM_EPOCHS,
+        "--epochs",
+        min=1,
+        help="Number of training epochs.",
+    ),
+    batch_size: int = typer.Option(
+        config.BATCH_SIZE,
+        "--batch-size",
+        min=1,
+        help="Batch size for DataLoaders.",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        min=14,
+        help="Optional balanced image subset for smoke tests.",
+    ),
+):
     """Run the training job: data -> train -> tune -> evaluate -> log -> register."""
+    setup_mlflow_tracking(config.EXPERIMENT_NAME)
+
+    # Keep parity with notebook ordering: data prep before starting the MLflow run.
+    image_dataset = load_image_dataset(config.TRAIN_METADATA_PATH, config.TRAIN_DATA_DIR)
+    if limit is not None:
+        image_dataset = limit_image_dataset(image_dataset, limit)
+        logger.info(f"Using {len(image_dataset)} balanced images due to --limit={limit}")
+
+    train_dataset, val_dataset, test_dataset = split_dataset(image_dataset)
+    train_transforms, val_transforms = define_transforms()
+    train_loader, val_loader, test_loader = create_dataloaders(
+        train_dataset,
+        val_dataset,
+        test_dataset,
+        train_transforms,
+        val_transforms,
+        batch_size=batch_size,
+    )
+
+    image_stats = calculate_image_statistics(train_loader)
+    config.IMAGE_STATISTICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(config.IMAGE_STATISTICS_PATH, "w") as f:
+        json.dump(image_stats, f, indent=2)
+    save_class_names(config.CLASS_NAMES_PATH)
+
+    # Notebook parity: reseed immediately before starting and running training.
+    torch.manual_seed(config.RANDOM_STATE)
+    np.random.seed(config.RANDOM_STATE)
+
+    if mlflow.active_run():
+        mlflow.end_run()
+
+    run = mlflow.start_run(run_name="training_notebook")
+
+    try:
+        mlflow.log_param("model_architecture", "SimpleCNN")
+        mlflow.log_param("batch_size", batch_size)
+        mlflow.log_param("num_epochs", epochs)
+        mlflow.log_param("learning_rate", config.LEARNING_RATE)
+        mlflow.log_param("initial_threshold", config.THRESHOLD)
+        mlflow.log_param("num_classes", config.NUM_CLASSES)
+        mlflow.log_param("image_size", f"{config.IMAGE_SIZE[0]}x{config.IMAGE_SIZE[1]}")
+        mlflow.log_param("random_seed", config.RANDOM_STATE)
+
+        model_params = sum(p.numel() for p in SimpleCNN().parameters())
+        trainable_params = sum(p.numel() for p in SimpleCNN().parameters() if p.requires_grad)
+        mlflow.log_param("total_parameters", model_params)
+        mlflow.log_param("trainable_parameters", trainable_params)
+
+        cnn_model, _training_history = train_cnn_model(
+            train_loader,
+            val_loader,
+            num_epochs=epochs,
+            learning_rate=config.LEARNING_RATE,
+            device=get_device(),
+            random_seed=config.RANDOM_STATE,
+        )
+
+        optimal_threshold = tune_threshold(cnn_model, val_loader, device=get_device())
+        test_results = evaluate_cnn_model(
+            cnn_model,
+            test_loader,
+            device=get_device(),
+            threshold=optimal_threshold,
+        )
+
+        baseline_stats = compute_baseline_statistics(
+            cnn_model,
+            val_loader,
+            device=get_device(),
+            threshold=optimal_threshold,
+        )
+        log_baseline_metrics(baseline_stats)
+
+        config.ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "model_state_dict": cnn_model.state_dict(),
+                "architecture": SimpleCNN.__name__,
+                "input_shape": (3, 64, 64),
+                "output_shape": (1,),
+                "threshold": optimal_threshold,
+                "num_classes": config.NUM_CLASSES,
+            },
+            config.PYTORCH_MODEL_PATH,
+        )
+
+        with open(config.MODEL_RESULTS_PATH, "w") as results_file:
+            json.dump(test_results, results_file, indent=2)
+
+        mlflow.log_param("classification_threshold", optimal_threshold)
+
+        wrapper = SimpleLoggingWrapper(model=cnn_model)
+        mlflow.pyfunc.log_model(config.MODEL_ARTIFACT_PATH, python_model=wrapper)
+
+        model_version = register_model(run.info.run_id)
+
+        logger.info(
+            f"Training complete: train={len(train_loader.dataset)}, "
+            f"val={len(val_loader.dataset)}, test={len(test_loader.dataset)}, "
+            f"threshold={optimal_threshold:.4f}, "
+            f"test_f1={test_results['f1_score']:.4f}, "
+            f"registered={config.MODEL_NAME} v{model_version} (Staging)"
+        )
+    finally:
+        if mlflow.active_run():
+            mlflow.end_run()
 
 
 if __name__ == "__main__":
