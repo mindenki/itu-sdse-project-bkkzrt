@@ -19,6 +19,8 @@ import time
 
 from loguru import logger
 import mlflow
+import mlflow.artifacts
+from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 import typer
 
@@ -30,7 +32,6 @@ app = typer.Typer()
 
 def get_best_run(experiment_name=config.EXPERIMENT_NAME):
     """The best run of the experiment is the one with the highest test F1-score."""
-    experiment = mlflow.get_experiment_by_name(experiment_name)
     experiment = mlflow.get_experiment_by_name(experiment_name)
     if experiment is None:
         raise RuntimeError(
@@ -70,8 +71,10 @@ def get_production_model(client, model_name=config.MODEL_NAME):
                 f"Production model: {model_name} version {model.version} (run {model.run_id})"
             )
             return f"models:/{model_name}@Production", model.version, model.run_id
-    except Exception:  # noqa: BLE001, S110 - kept exactly as in the notebook
-        pass
+    except MlflowException as e:
+        # No Production alias (or no registered model yet). Any other error such as a
+        # locked or missing tracking store is raised instead of swallowed
+        logger.info(f"No Production alias for {model_name} ({e}); checking stages")
 
     # Fall back to checking stage="Production"
     for model in client.search_model_versions(f"name='{model_name}'"):
@@ -117,17 +120,29 @@ def select_run_to_promote(experiment_best, prod_model_run_id):
 
 
 def wait_for_deployment(client, model_name, version, stage="Staging", max_attempts=20):
-    """Wait until the model version has transitioned to the given stage."""
-    for _ in range(max_attempts):
+    """Wait until the model version has transitioned to the given stage.
+
+    Raises TimeoutError if it hasn't after `max_attempts` checks. The notebook returned
+    False instead, which every caller ignored.
+    """
+    status = False
+    for _attempt in range(max_attempts):
         model_version_details = dict(client.get_model_version(name=model_name, version=version))
         if model_version_details["current_stage"] == stage:
             logger.info(f"Transition completed to {stage}")
-            return True
-        logger.info(
-            f"Waiting for transition to {stage} (current: {model_version_details['current_stage']})"
+            status = True
+            break
+        else:
+            logger.info(
+                f"Waiting for transition to {stage} "
+                f"(current: {model_version_details['current_stage']})"
+            )
+            time.sleep(2)
+    if not status:
+        raise TimeoutError(
+            f"{model_name} version {version} did not reach {stage} after {max_attempts} checks"
         )
-        time.sleep(2)
-    return False
+    return status
 
 
 def promote_model(
@@ -138,9 +153,9 @@ def promote_model(
 ):
     """Promote the model of a run to Production (always via Staging). Returns its version.
 
-    `run_id` is None when the comparison decided to keep the current production model;
-    the notebook still looks the run up and moves it to Staging in that case, and only
-    the Production transition is guarded.
+    Only call this with a run id: when the comparison keeps the current production
+    model (`run_id` is None), `main()` skips promotion. The notebook called it anyway and
+    crashed trying to register `runs:/None/...`.
     """
     # Find the registered version that belongs to the winning run
     versions = [
@@ -253,7 +268,8 @@ def export_model(
         start_time = client.get_run(prod_mv.run_id).info.start_time
         trained_at = datetime.fromtimestamp(start_time / 1000, tz=UTC).isoformat()
         version_info = {"model_version": str(prod_mv.version), "trained_at": trained_at}
-    except Exception:  # noqa: BLE001 - kept exactly as in the notebook
+    except MlflowException as e:
+        logger.warning(f"No Production alias to read the version from ({e}); using fallback")
         version_info = {"model_version": str(fallback_version), "trained_at": None}
 
     with open(export_dir / "version.json", "w") as f:
