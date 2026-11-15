@@ -80,11 +80,6 @@ def get_production_model(client, model_name=config.MODEL_NAME):
     return None, None, None
 
 
-def _f1_score_of(metrics):
-    """Test F1 of a run's metrics, falling back to the legacy `f1_score` metric."""
-    return metrics.get("test_f1_score") or metrics.get("f1_score")
-
-
 def select_run_to_promote(experiment_best, prod_model_run_id):
     """Decide which run to promote: the best run, if it beats production.
 
@@ -99,7 +94,10 @@ def select_run_to_promote(experiment_best, prod_model_run_id):
         return experiment_best["run_id"]
 
     prod_run = mlflow.get_run(prod_model_run_id)
-    prod_model_score = _f1_score_of(prod_run.data.metrics)
+    prod_metrics = prod_run.data.metrics
+    prod_model_score = prod_metrics.get("test_f1_score")
+    if prod_model_score is None:
+        prod_model_score = prod_metrics.get("f1_score")
     logger.info(
         f"Comparing models: current best (training) {train_model_score}, "
         f"production {prod_model_score}"
