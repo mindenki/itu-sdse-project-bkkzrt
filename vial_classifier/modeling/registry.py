@@ -31,6 +31,11 @@ app = typer.Typer()
 def get_best_run(experiment_name=config.EXPERIMENT_NAME):
     """The best run of the experiment is the one with the highest test F1-score."""
     experiment = mlflow.get_experiment_by_name(experiment_name)
+    experiment = mlflow.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        raise RuntimeError(
+            f"Experiment '{experiment_name}' not found - run training first"
+        )
     experiment_best = mlflow.search_runs(
         experiment_ids=[experiment.experiment_id],
         order_by=["metrics.test_f1_score DESC"],
@@ -265,10 +270,16 @@ def main(export_dir: Path = config.EXPORT_DIR):
 
     experiment_best = get_best_run()
     load_model_results()
-    _, _, prod_model_run_id = get_production_model(client)
+    _, prod_model_version, prod_model_run_id = get_production_model(client)
 
     run_id = select_run_to_promote(experiment_best, prod_model_run_id)
-    version = promote_model(client, run_id)
+    if run_id is None:
+        #the notebook still called promote_model here and crashed with
+        #"Run with id=None not found";
+        logger.info("Keeping the current production model; nothing to promote.")
+        version = prod_model_version
+    else:
+        version = promote_model(client, run_id)
     export_model(client, export_dir=export_dir, fallback_version=version)
 
 
