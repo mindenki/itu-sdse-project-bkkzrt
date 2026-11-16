@@ -3,19 +3,18 @@
 The exported pyfunc model is served by the MLflow scoring server as a subprocess on
 `UPSTREAM_PORT`, with this small FastAPI app in front of it:
 
+- MLflow scoring server as a subprocess on UPSTREAM_PORT
 - GET  /health      -> {"status": "ok"} once the model is loaded
 - POST /invocations -> forwarded unchanged to the scoring server
 - POST /infer       -> alias of /invocations
 - GET  /version     -> model version + training timestamp from version.json
 - GET  /drift       -> monitoring.drift.detect_drift over the inference log
 
-We start the scoring server ourselves (what `mlflow models serve` does under the hood)
-to control the response bodies: MLflow's own /health answers with a bare newline,
-which JSON clients reject.
 
 CLI: `python -m vial_classifier.serving.app`
 """
 
+import atexit
 from contextlib import asynccontextmanager
 import json
 import os
@@ -45,7 +44,7 @@ def start_scoring_server(model_path=config.EXPORT_DIR):
     # interpreter's bin directory is on it
     interpreter_bin = os.path.dirname(os.path.abspath(sys.executable))
     env["PATH"] = os.pathsep.join([interpreter_bin, env.get("PATH", "")])
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [
             sys.executable,
             "-m",
@@ -64,6 +63,8 @@ def start_scoring_server(model_path=config.EXPORT_DIR):
         ],
         env=env,
     )
+    atexit.register(lambda: proc.poll() is None and proc.terminate())
+    return proc
 
 
 @asynccontextmanager
@@ -73,7 +74,7 @@ async def lifespan(app):
     logger.info(f"Scoring server starting on port {config.UPSTREAM_PORT}")
     try:
         yield
-    finally:
+    finally: #the notebook's cleanup cell
         if scoring_proc is not None and scoring_proc.poll() is None:
             scoring_proc.terminate()
             scoring_proc.wait(timeout=10)
