@@ -29,6 +29,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "cookiecutter-data-science>=2.3.0",
+    "dagger-io==0.21.11",
     "httpx",
     "ipykernel>=7.4.0",
     "pytest",

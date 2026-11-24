@@ -53,7 +53,13 @@ create_environment:
 	@echo ">>> New uv virtual environment created. Activate with:"
 	@echo ">>> Windows: .\\\\.venv\\\\Scripts\\\\activate"
 	@echo ">>> Unix/macOS: source ./.venv/bin/activate"
-	
+
+
+## Install the Dagger CLI into .venv (version pinned by dagger-io in uv.lock)
+.PHONY: tools
+tools: requirements
+	@uv run python -c "$${INSTALL_DAGGER_PYSCRIPT}"
+
 
 
 
@@ -89,6 +95,21 @@ export:
 #################################################################################
 
 .DEFAULT_GOAL := help
+
+# Uses the dagger-io SDK's own downloader: it fetches the CLI release matching the
+# SDK version and verifies its checksum. The download cache lives inside .venv and
+# the binary is copied next to python (.venv/bin, or .venv/Scripts on Windows).
+define INSTALL_DAGGER_PYSCRIPT
+import os, shutil, sys, sysconfig; \
+from pathlib import Path; \
+os.environ['XDG_CACHE_HOME'] = str(Path(sys.prefix) / 'cache'); \
+from dagger.provisioning._download import Downloader; \
+src = Path(Downloader().get_sync()); \
+dst = Path(sysconfig.get_path('scripts')) / ('dagger.exe' if src.suffix == '.exe' else 'dagger'); \
+shutil.copy2(src, dst); \
+print(f'Installed {dst}')
+endef
+export INSTALL_DAGGER_PYSCRIPT
 
 define PRINT_HELP_PYSCRIPT
 import re, sys; \
