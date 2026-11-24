@@ -1,5 +1,10 @@
-"""Model selection, promotion and export.
+"""Model registry: registration (training) and selection, promotion and export (deployment).
 
+Training (notebooks/01_training.ipynb), called from `modeling.train`:
+- register `runs:/<run_id>/model_pyfunc`, wait until it is READY, move it to Staging
+  and give it the `best` alias
+
+Deployment (notebooks/02_deployment.ipynb), the CLI of this module:
 - pick the best run of the experiment by test F1
 - compare it with the current Production model
 - promote the winner via Staging -> Production (+ alias, tags)
@@ -11,6 +16,7 @@ The exported directory is what CI uploads as the `model` artifact.
 
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 from pprint import pformat
 import shutil
@@ -20,14 +26,74 @@ import time
 from loguru import logger
 import mlflow
 import mlflow.artifacts
+from mlflow.entities.model_registry.model_version_status import ModelVersionStatus
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 import typer
 
 from vial_classifier import config
-from vial_classifier.modeling.train import setup_mlflow_tracking
 
 app = typer.Typer()
+
+
+# --- Registration (notebook 01) -------------------------------------------------
+
+
+def _setup_mlflow_tracking():
+    os.makedirs(config.MLFLOW_STATE_DIR, exist_ok=True)
+    mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
+
+
+def wait_until_ready(model_name, model_version, max_attempts=10):
+    """Wait until the model version is READY in the registry."""
+    client = MlflowClient()
+    for attempt in range(max_attempts):
+        try:
+            model_version_details = client.get_model_version(name=model_name, version=model_version)
+            status = ModelVersionStatus.from_string(model_version_details.status)
+            print(f"Model status: {ModelVersionStatus.to_string(status)}")
+            if status == ModelVersionStatus.READY:
+                print(f"Model {model_name} version {model_version} is READY")
+                return True
+        except Exception as e:
+            print(f"Error checking model status (attempt {attempt + 1}/{max_attempts}): {e}")
+        time.sleep(1)
+    print(f"Model {model_name} version {model_version} did not become READY after {max_attempts} attempts")
+    return False
+
+
+def register_model(
+    run_id,
+    model_name=config.MODEL_NAME,
+    artifact_path=config.MODEL_ARTIFACT_PATH,
+):
+    """Register one run artifact and promote it to Staging."""
+    _setup_mlflow_tracking()
+
+    model_uri = f"runs:/{run_id}/{artifact_path}"
+    model_details = mlflow.register_model(model_uri=model_uri, name=model_name)
+    wait_until_ready(model_details.name, model_details.version)
+
+    client = MlflowClient()
+    client.transition_model_version_stage(
+        name=model_name,
+        version=model_details.version,
+        stage="Staging",
+        archive_existing_versions=True,
+    )
+    client.set_model_version_tag(model_name, model_details.version, "deployed_to", "staging")
+    client.set_model_version_tag(model_name, model_details.version, "task", "classification")
+    client.set_registered_model_alias(
+        name=model_name,
+        alias="best",
+        version=str(model_details.version),
+    )
+
+    print(f"Successfully transitioned {model_name} version {model_details.version} to Staging")
+    return int(model_details.version)
+
+
+# --- Selection, promotion and export (notebook 02) -----------------------------
 
 
 def get_best_run(experiment_name=config.EXPERIMENT_NAME):
@@ -281,6 +347,10 @@ def export_model(
 @app.command()
 def main(export_dir: Path = config.EXPORT_DIR):
     """Select, promote and export the best model to models/model."""
+    # Imported here: train.py imports register_model from this module, so a
+    # top-level import of train would be circular.
+    from vial_classifier.modeling.train import setup_mlflow_tracking
+
     setup_mlflow_tracking(config.EXPERIMENT_NAME)
     client = MlflowClient()
 
