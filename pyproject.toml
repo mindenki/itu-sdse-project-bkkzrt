@@ -59,7 +59,7 @@ markers = [
 ]
 
 [tool.pyright]
-include = ["vial_classifier", "tests"]
+include = ["vial_classifier", "scripts", "tests"]
 pythonVersion = "3.13"
 venvPath = "."
 venv = ".venv"
@@ -69,8 +69,8 @@ reportPrivateImportUsage = false
 
 [tool.ruff]
 line-length = 99
-src = ["vial_classifier", "tests"]
-include = ["pyproject.toml", "vial_classifier/**/*.py", "tests/**/*.py"]
+src = ["vial_classifier", "tests", "scripts"]
+include = ["pyproject.toml", "vial_classifier/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # import sorting
