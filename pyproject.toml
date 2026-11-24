@@ -32,6 +32,7 @@ dev = [
     "dagger-io==0.21.11",
     "httpx",
     "ipykernel>=7.4.0",
+    "pyright[nodejs]>=1.1.414",
     "pytest",
     "ruff",
 ]
@@ -56,6 +57,15 @@ testpaths = ["tests"]
 markers = [
     "slow: runs the real training and MLflow pipeline",
 ]
+
+[tool.pyright]
+include = ["vial_classifier", "tests"]
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+# mlflow exposes `mlflow.artifacts`, `mlflow.pyfunc.PythonModel` etc. without
+# declaring them as re-exports, which pyright would flag on every use
+reportPrivateImportUsage = false
 
 [tool.ruff]
 line-length = 99

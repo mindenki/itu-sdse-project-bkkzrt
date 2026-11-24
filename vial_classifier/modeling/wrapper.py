@@ -135,12 +135,15 @@ class SimpleLoggingWrapper(mlflow.pyfunc.PythonModel):
                 f"Unsupported image input type: {type(image_input)}. Expected str, Path, or bytes."
             )
 
-        return self.transform(image).unsqueeze(0)
+        tensor = self.transform(image)
+        assert isinstance(tensor, torch.Tensor)
+        return tensor.unsqueeze(0)
 
-    def predict(self, context, model_input):
+    def predict(self, context, model_input):  # pyright: ignore[reportIncompatibleMethodOverride]
         """Make predictions on input data and log the request."""
         if self.model is None:
             self.load_context(context)
+        assert self.model is not None
 
         # Handle different input formats
         if isinstance(model_input, dict):

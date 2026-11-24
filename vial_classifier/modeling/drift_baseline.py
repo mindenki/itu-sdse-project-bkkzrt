@@ -153,4 +153,4 @@ def log_baseline_metrics(baseline_stats):
     )
     mlflow.log_metric("baseline_confidence_mean", baseline_stats["confidence_statistics"]["mean"])
     mlflow.log_metric("baseline_confidence_std", baseline_stats["confidence_statistics"]["std"])
-    mlflow.log_artifact(config.DRIFT_BASELINE_STATS_PATH, "drift_detection")
+    mlflow.log_artifact(config.DRIFT_BASELINE_STATS_PATH, "drift_detection")  # pyright: ignore[reportArgumentType]

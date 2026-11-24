@@ -107,7 +107,7 @@ def load_image_dataset(metadata_path=config.TRAIN_METADATA_PATH, image_dir=confi
     missing_files = []
     for _, row in metadata.iterrows():
         filename = row["filename"]
-        label = int(row["class"])
+        label = int(row["class"])  # pyright: ignore[reportArgumentType] - pandas types a row cell as Series
         image_path = Path(image_dir) / filename
         if image_path.exists():
             image_dataset.append((image_path, label))
