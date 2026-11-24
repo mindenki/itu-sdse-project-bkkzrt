@@ -1,0 +1,25 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+# Install locked production dependencies before copying source so this layer is cached.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY README.md ./
+COPY vial_classifier/ vial_classifier/
+RUN uv sync --frozen --no-dev
+
+# The model is not copied here: the pipeline adds the exported pyfunc model to
+# /app/models/model and its drift baseline to /app/artifacts/drift_baseline_stats.json
+# after building. To run the image by hand, mount both at those paths.
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+# FastAPI app on 5001 in front of the MLflow scoring server (internal port 5002).
+# /health answers 503 until the model is loaded.
+EXPOSE 5001
+
+CMD ["python", "-m", "vial_classifier.serving.app"]
