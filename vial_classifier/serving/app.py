@@ -74,7 +74,7 @@ async def lifespan(app):
     logger.info(f"Scoring server starting on port {config.UPSTREAM_PORT}")
     try:
         yield
-    finally: #the notebook's cleanup cell
+    finally:  # the notebook's cleanup cell
         if scoring_proc is not None and scoring_proc.poll() is None:
             scoring_proc.terminate()
             scoring_proc.wait(timeout=10)
