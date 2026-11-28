@@ -1,0 +1,159 @@
+name: Pipeline
+
+# Thin wrapper around the Dagger pipeline (dagger/): GitHub only restores and saves
+# state, uploads artifacts and passes the deployment secrets. Pull requests run the
+# checks, training and comparison but never deploy; merges to main deploy to Azure when
+# the new model is better (or when the merged PR has the `hotfix` label).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: Deploy even if the model is not better
+        type: boolean
+        default: false
+      reset_registry:
+        description: Start with an empty MLflow registry (when the saved state has expired)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read # download the MLflow state of the previous main run
+  pull-requests: read # read the merged PR's labels
+
+# Main runs build on each other's model registry: run them one at a time, never cancel.
+# A new push to a pull request cancels its previous run.
+concurrency:
+  group: pipeline-${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DAGGER_VERSION: "0.21.11" # keep in sync with dagger-io in uv.lock
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The registry (mlflow-state/) never enters git: every successful main run uploads
+      # it as an artifact and the next run restores it, so a new model is compared with
+      # the one that is deployed.
+      - name: Restore the MLflow state of the last successful main run
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESET: ${{ inputs.reset_registry }}
+        run: |
+          if [ "$RESET" = "true" ]; then
+            echo "Reset requested: starting with an empty registry"
+            exit 0
+          fi
+          run_id="$(gh run list --workflow pipeline.yml --branch main --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run_id" ]; then
+            echo "No successful main run yet: starting with an empty registry"
+            exit 0
+          fi
+          if ! gh run download "$run_id" --name mlflow-state --dir mlflow-state; then
+            echo "::error::Run $run_id has no mlflow-state artifact (expired?). Start the workflow manually with reset_registry to begin a new registry."
+            exit 1
+          fi
+          echo "args=--state mlflow-state" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to force a deploy
+        id: force
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          FORCE_INPUT: ${{ inputs.force_deploy }}
+        run: |
+          force=false
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" = "true" ]; then
+            force=true
+          fi
+          if [ "$EVENT" = "push" ]; then
+            labels="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq '.[0].labels[].name' 2>/dev/null || true)"
+            if echo "$labels" | grep -qx hotfix; then
+              echo "The merged pull request has the hotfix label"
+              force=true
+            fi
+          fi
+          echo "force=$force" >> "$GITHUB_OUTPUT"
+
+      - name: Pipeline (pull request, no deploy)
+        if: github.event_name == 'pull_request'
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: ${{ env.DAGGER_VERSION }}
+          call: run ${{ steps.state.outputs.args }} export --path out
+
+      - name: Pipeline (main, deploy if better)
+        if: github.event_name != 'pull_request'
+        uses: dagger/dagger-for-github@v8.4.1
+        env:
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        with:
+          version: ${{ env.DAGGER_VERSION }}
+          call: >-
+            with-azure
+            --registry ${{ vars.AZURE_REGISTRY }}
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }}
+            --container-app ${{ vars.AZURE_CONTAINER_APP }}
+            --tenant-id ${{ secrets.AZURE_TENANT_ID }}
+            --subscription-id ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+            --client-id ${{ secrets.AZURE_CLIENT_ID }}
+            --client-secret env://AZURE_CLIENT_SECRET
+            --tag sha-${{ github.sha }}
+            run ${{ steps.state.outputs.args }}
+            --force-deploy=${{ steps.force.outputs.force }}
+            export --path out
+
+      # Required by the assignment: the exported pyfunc model as the `model` artifact
+      - name: Upload the model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: out/models/model
+          retention-days: 7
+
+      # The course validator still expects a scikit-learn model.pkl, so it cannot load an
+      # MLflow pyfunc model yet. It runs for visibility but cannot fail the pipeline; the
+      # blocking validation is part of the Dagger pipeline.
+      - name: Course model validator
+        continue-on-error: true
+        uses: lasselundstenjensen/itu-sdse-project-model-validator@main
+
+      - name: Save the MLflow state for the next run
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-state
+          path: out/mlflow-state
+          retention-days: 90
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Pipeline"
+            if [ -f out/decision.json ]; then
+              echo "### Model"
+              jq -r '"- promoted: \(.promoted)\n- Production version before: \(.production_version_before)\n- Production version after: \(.production_version_after)"' out/decision.json
+              jq -r '"- test accuracy: \(.accuracy)\n- test F1: \(.f1_score)\n- ROC-AUC: \(.roc_auc)"' out/artifacts/model_results.json
+              echo "- validation passed: $(jq -r .passed out/validation/result.json)"
+            else
+              echo "No pipeline outputs: see the Dagger step's log."
+            fi
+            if [ -f out/deployment.json ]; then
+              echo "### Deployment"
+              jq -r '"- image: \(.image)\n- URL: \(.url)"' out/deployment.json
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
