@@ -13,6 +13,10 @@
 /models/*
 !/models/.gitkeep
 
+# Local outputs: model validation results and notebook reference snapshots
+/validation/
+/reference/
+
 
 # Mac OS-specific storage files
 .DS_Store

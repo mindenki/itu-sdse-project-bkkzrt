@@ -28,7 +28,7 @@ from vial_classifier.modeling.wrapper import SimpleLoggingWrapper
 app = typer.Typer()
 
 
-def setup_mlflow_tracking(experiment_name=config.EXPERIMENT_NAME):
+def setup_mlflow_tracking(experiment_name: str | None = config.EXPERIMENT_NAME):
     """Point MLflow at the local state dir and create the experiment if needed."""
     os.makedirs(config.MLFLOW_STATE_DIR, exist_ok=True)
     mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
@@ -403,8 +403,8 @@ def main(
         model_version = register_model(run.info.run_id)
 
         logger.info(
-            f"Training complete: train={len(train_loader.dataset)}, "
-            f"val={len(val_loader.dataset)}, test={len(test_loader.dataset)}, "
+            f"Training complete: train={len(train_dataset)}, "
+            f"val={len(val_dataset)}, test={len(test_dataset)}, "
             f"threshold={optimal_threshold:.4f}, "
             f"test_f1={test_results['f1_score']:.4f}, "
             f"registered={config.MODEL_NAME} v{model_version} (Staging)"

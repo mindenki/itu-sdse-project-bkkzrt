@@ -281,8 +281,10 @@ def test_model_is_loaded_from_a_checkpoint_on_first_predict(
     result = wrapper.predict(None, image_path)
 
     assert result["predictions"] in ([0], [1])
-    assert not wrapper.get_raw_model().training
-    loaded = wrapper.get_raw_model().state_dict()
+    model = wrapper.get_raw_model()
+    assert model is not None
+    assert not model.training
+    loaded = model.state_dict()
     assert all(torch.equal(value, loaded[key]) for key, value in source.state_dict().items())
 
 

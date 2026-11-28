@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 from pprint import pformat
+from typing import cast
 
 from loguru import logger
 import numpy as np
@@ -108,7 +109,9 @@ def check_confidence_drift(current_confidences, baseline_stats):
     baseline_samples = np.random.normal(
         baseline_mean, baseline_std, size=len(current_confidences_array)
     )
-    ks_statistic, ks_pvalue = ks_2samp(baseline_samples, current_confidences_array)
+    ks_statistic, ks_pvalue = cast(
+        tuple[float, float], ks_2samp(baseline_samples, current_confidences_array)
+    )
 
     mean_diff = abs(current_mean - baseline_mean)
     ks_drift = ks_pvalue < config.DRIFT_KS_PVALUE_THRESHOLD
@@ -144,7 +147,7 @@ def check_class_distribution_drift(predictions, baseline_stats):
     baseline_dist = np.array([baseline_prop_0, baseline_prop_1])
 
     baseline_samples = np.random.choice([0, 1], size=baseline_total, p=baseline_dist)
-    ks_statistic, ks_pvalue = ks_2samp(baseline_samples, predictions)
+    ks_statistic, ks_pvalue = cast(tuple[float, float], ks_2samp(baseline_samples, predictions))
 
     drift_detected = bool(ks_pvalue < config.DRIFT_KS_PVALUE_THRESHOLD)
 
